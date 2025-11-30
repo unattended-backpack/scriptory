@@ -1,0 +1,74 @@
+services:
+  hierophant:
+    image: ${HIEROPHANT_IMAGE:-unattended/hierophant:latest}
+    container_name: hierophant
+    networks:
+      - network
+    ports:
+      - "9000:9000"  # gRPC
+      - "9010:9010"  # HTTP + WebSocket
+    volumes:
+      - ./hierophant.toml:/home/hierophant/hierophant.toml:ro
+    env_file:
+      - .env
+    environment:
+      - RUST_LOG=info
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/localhost/9010 && echo -e 'GET /health HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && timeout 1 cat <&3 | head -n 1 | grep -q '200 OK'"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+      start_period: 5s
+
+  magister:
+    image: ${MAGISTER_IMAGE:-unattended/magister:latest}
+    container_name: magister
+    networks:
+      - network
+    ports:
+      - "8555:8555"
+    volumes:
+      - ./magister.toml:/home/magister/magister.toml:ro
+    env_file:
+      - .env
+    environment:
+      - RUST_LOG=info
+    depends_on:
+      hierophant:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/localhost/8555 && echo -e 'GET /summary HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && timeout 1 cat <&3 | head -n 1 | grep -q '200 OK'"]
+      interval: 2s
+      timeout: 2s
+      retries: 10
+      start_period: 10s
+
+  fibonacci:
+    build:
+      context: ./src/fibonacci
+      dockerfile: Dockerfile
+    container_name: fibonacci
+    networks:
+      - network
+    depends_on:
+      hierophant:
+        condition: service_healthy
+      magister:
+        condition: service_healthy
+    environment:
+      - RUST_LOG=info
+    command:
+      - bash
+      - -c
+      - |
+        echo "Waiting for at least one idle Contemplant..."
+        while ! (exec 3<>/dev/tcp/hierophant/9010 && echo -e 'GET /contemplants HTTP/1.1\r\nHost: hierophant\r\nConnection: close\r\n\r\n' >&3 && cat <&3 | grep -q "Idle"); do
+          echo "No idle Contemplants available yet, waiting..."
+          sleep 5
+        done
+        echo "Idle Contemplant found, starting fibonacci proof..."
+        cargo run --release --bin evm -- --n 10 --system plonk
+
+networks:
+  network:
+    driver: bridge
