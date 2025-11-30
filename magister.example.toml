@@ -1,0 +1,135 @@
+# Example configuration for Magister.
+# Copy this file to magister.toml and adjust as needed.
+
+# REQUIRED: Publicly accessible address where this Magister can be reached.
+# Used by Hierophant to send drop requests via HTTP.
+# Format: http://[host] (do not include port, trailing slash, or /drop path)
+# Port is specified separately via http_port configuration.
+this_magister_addr = "http://magister"
+
+# REQUIRED: IP address or hostname where Contemplants can reach Hierophant.
+# Passed to Contemplants when they are created so they know where to connect.
+hierophant_ip = "hierophant"
+
+# REQUIRED: HTTP port where Hierophant is listening.
+# Contemplants will connect via WebSocket at ws://[hierophant_ip]:[hierophant_http_port]/ws
+hierophant_http_port = 9010
+
+# REQUIRED: Vast.ai API key for managing instances.
+# Obtain from https://vast.ai/ under Account > API Keys
+vast_api_key = "your-vast-api-key-here"
+
+# REQUIRED: Vast.ai template hash to use for creating instances.
+# Template should contain a Contemplant image configured to run on startup.
+# Find template hash in the Vast.ai web console under your saved templates.
+template_hash = "819fdf2e42fc8ceb32f295465b5bb21e"
+
+# REQUIRED: Number of instances to maintain.
+# Magister will continuously monitor and ensure this many instances are running.
+number_instances = 1
+
+# OPTIONAL: HTTP server port (default: 8555).
+# http_port = 8555
+
+# OPTIONAL: Seconds to wait between Vast.ai API calls (default: 10).
+# Helps avoid rate limiting from Vast.ai.
+# vast_api_call_backoff_secs = 10
+
+# OPTIONAL: Seconds between instance polling checks (default: 30).
+# How often Magister checks if instances need to be created or cleaned up.
+# task_polling_interval_secs = 30
+
+# OPTIONAL: Seconds to wait for Contemplant verification (default: 180).
+# How long to wait after creating an instance for the Contemplant to call /verify
+# before considering the instance failed and dropping it.
+# contemplant_verification_timeout_secs = 300
+
+# OPTIONAL: List of Vast.ai host IDs to avoid.
+# Instances will not be created on these hosts.
+# bad_hosts = [213498, 74292, 113132]
+
+# OPTIONAL: List of Vast.ai machine IDs to avoid.
+# Instances will not be created on these machines.
+# bad_machines = [12217, 19571]
+
+# OPTIONAL: List of preferred Vast.ai host IDs.
+# These hosts will be prioritized when creating instances.
+# good_hosts = [207289, 1276]
+
+# OPTIONAL: List of preferred Vast.ai machine IDs.
+# These machines will be prioritized when creating instances.
+# good_machines = [13428, 8218]
+
+# Vast query configuration controls which machines are eligible for instance creation.
+# These settings are converted into a Vast.ai search query.
+[vast_query]
+
+# REQUIRED: Allocated storage in GB for the instance.
+allocated_storage = 16
+
+# REQUIRED: GPU model name to search for.
+# Common options: "RTX 4090", "RTX 3090", "A100", etc.
+gpu_name = "RTX 4090"
+
+# REQUIRED: Minimum host reliability score (0.0 to 1.0).
+# Higher values mean more reliable hosts but fewer options.
+reliability = 0.99
+
+# REQUIRED: Minimum CUDA version required.
+min_cuda_version = 12.8
+
+# REQUIRED: Minimum GPU RAM in GB.
+gpu_ram = 21
+
+# REQUIRED: Minimum disk space in GB.
+disk_space = 16
+
+# REQUIRED: Minimum rental duration in hours.
+# Higher values may give better availability.
+duration = 192679
+
+# REQUIRED: Maximum cost per hour in USD.
+# Instances costing more than this will be filtered out.
+cost_per_hour = 0.60
+
+# Contemplant configuration controls settings for Contemplants spawned by this Magister.
+# These settings are passed as environment variables to Contemplants on Vast.ai.
+# Note: MAGISTER_DROP_ENDPOINT and HIEROPHANT_WS_ADDRESS are managed automatically.
+[contemplant]
+
+# OPTIONAL: Prover type - "cpu" or "cuda" (default: "cpu").
+# CPU proving is slower but doesn't require GPU-specific setup.
+# prover_type = "cpu"
+
+# OPTIONAL: Human-readable name for Contemplants (default: generated from names.txt).
+# contemplant_name = "paulos"
+
+# OPTIONAL: Port for HTTP health check server (default: 9011).
+# http_port = 9011
+
+# OPTIONAL: Moongate CUDA prover endpoint (default: none).
+# Only used when prover_type is "cuda". If not set, Contemplant will spin up
+# a moongate-server Docker container automatically.
+# moongate_endpoint = "http://localhost:3000/twirp/"
+
+# OPTIONAL: Heartbeat interval in seconds (default: 30).
+# How often Contemplants tell Hierophant they are still alive.
+# heartbeat_interval_seconds = 30
+
+# OPTIONAL: Maximum number of finished proofs stored in memory (default: 2).
+# max_proofs_stored = 2
+
+# OPTIONAL: Path to log file for progress tracking (default: "./moongate.log").
+# moongate_log_path = "./moongate.log"
+
+# OPTIONAL: Log polling interval in milliseconds (default: 2000).
+# How frequently to check the moongate log file for progress updates.
+# watcher_polling_interval_ms = 2000
+
+# OPTIONAL: SSH public keys for debugging access (default: none).
+# Allows SSH access to Contemplant instances on port 2222 for debugging.
+# Format: newline-separated SSH public keys.
+# ssh_authorized_keys = """
+# ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAbc123... user@host
+# ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC... another@host
+# """
