@@ -6,9 +6,15 @@
 this_hierophant_ip = "hierophant"
 
 # OPTIONAL: Port for gRPC service (default: 9000).
+# Used by SP1 clients via sp1-sdk's network prover.
 # grpc_port = 9000
 
 # OPTIONAL: Port for HTTP and WebSocket service (default: 9010).
+# Carries three things on a single port:
+#   1. WebSocket connections from Contemplants registering with this Hierophant.
+#   2. HTTP endpoints for client artifact upload/download and operator status.
+#   3. The Bonsai-compatible REST surface at /bonsai/ used by RISC Zero
+#      clients via bonsai-sdk.
 # http_port = 9010
 
 # OPTIONAL: Timeout in seconds for worker responses (default: 30).

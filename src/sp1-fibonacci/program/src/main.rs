@@ -9,9 +9,11 @@
 sp1_zkvm::entrypoint!(main);
 
 use alloy_sol_types::SolType;
-use fibonacci_lib::{fibonacci, PublicValuesStruct};
+use fibonacci::fibonacci;
+use fibonacci_lib::PublicValuesStruct;
 
 pub fn main() {
+
     // Read an input to the program.
     //
     // Behind the scenes, this compiles down to a custom system call which handles reading inputs

@@ -2,11 +2,12 @@ services:
   hierophant:
     image: ${HIEROPHANT_IMAGE:-unattended/hierophant:latest}
     container_name: hierophant
-    networks:
-      - network
-    ports:
-      - "9000:9000"  # gRPC
-      - "9010:9010"  # HTTP + WebSocket
+
+    # Host networking: hierophant binds 9000 + 9010 directly on the host so
+    # Vast.ai contemplants reach them via the router-forwarded WAN IP and
+    # local fibonacci clients reach them via localhost. Eliminates Docker
+    # bridge + published-port indirection that complicates NAT hairpin.
+    network_mode: host
     volumes:
       - ./hierophant.toml:/home/hierophant/hierophant.toml:ro
     env_file:
@@ -23,10 +24,7 @@ services:
   magister:
     image: ${MAGISTER_IMAGE:-unattended/magister:latest}
     container_name: magister
-    networks:
-      - network
-    ports:
-      - "8555:8555"
+    network_mode: host
     volumes:
       - ./magister.toml:/home/magister/magister.toml:ro
     env_file:
@@ -43,13 +41,27 @@ services:
       retries: 10
       start_period: 10s
 
-  fibonacci:
+  # SP1 fibonacci proof. Talks to Hierophant's SP1 prover network gRPC on
+  # :9000 via sp1-sdk's network prover. SP1_PROOF_SYSTEM picks the SP1
+  # proving mode and defaults to plonk; override via .env to exercise core,
+  # compressed, plonk, or groth16. Selected via the `sp1` compose profile;
+  # `make test-sp1` activates it, `make scriptory` activates both this and
+  # fibonacci-risc0 via the `all` profile alias.
+  # The SP1 fibonacci demo client. Generates a proof and emits a Solidity-
+  # verifier-compatible JSON fixture; verification of the proof itself
+  # happens server-side at Hierophant before the proof is returned, so this
+  # client doesn't carry the SP1 circuit artifacts that a client.verify
+  # path would need. Build context is the repo root so the Dockerfile's
+  # `COPY src/sp1-fibonacci/...` and `COPY src/fibonacci/` paths resolve.
+  fibonacci-sp1:
+    profiles: ["sp1", "all"]
     build:
-      context: ./src/fibonacci
-      dockerfile: Dockerfile
-    container_name: fibonacci
-    networks:
-      - network
+      context: .
+      dockerfile: src/sp1-fibonacci/Dockerfile
+      args:
+        BUILD_IMAGE: ${BUILD_IMAGE:-unattended/petros:latest}
+    container_name: fibonacci-sp1
+    network_mode: host
     depends_on:
       hierophant:
         condition: service_healthy
@@ -57,18 +69,59 @@ services:
         condition: service_healthy
     environment:
       - RUST_LOG=info
+      - SP1_PROOF_SYSTEM=${SP1_PROOF_SYSTEM:-plonk}
+ 
+      # Override the Dockerfile-baked NETWORK_RPC_URL=http://hierophant:9000;
+      # with host networking the Docker DNS name no longer resolves.
+      - NETWORK_RPC_URL=http://localhost:9000
     command:
       - bash
       - -c
       - |
-        echo "Waiting for at least one idle Contemplant..."
-        while ! (exec 3<>/dev/tcp/hierophant/9010 && echo -e 'GET /contemplants HTTP/1.1\r\nHost: hierophant\r\nConnection: close\r\n\r\n' >&3 && cat <&3 | grep -q "Idle"); do
+        echo "Waiting for an SP1-capable idle Contemplant..."
+        while ! (exec 3<>/dev/tcp/localhost/9010 && echo -e 'GET /contemplants HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 && cat <&3 | grep -q "Idle"); do
           echo "No idle Contemplants available yet, waiting..."
           sleep 5
         done
-        echo "Idle Contemplant found, starting fibonacci proof..."
-        cargo run --release --bin evm -- --n 10 --system plonk
+        echo "Idle Contemplant found, starting SP1 fibonacci proof (system=$$SP1_PROOF_SYSTEM)..."
+        cargo run --release --bin evm -- --n 10 --system "$$SP1_PROOF_SYSTEM"
 
-networks:
-  network:
-    driver: bridge
+  # RISC Zero fibonacci proof. Talks to Hierophant's Bonsai-shaped REST
+  # surface at :9010/bonsai/ via bonsai-sdk. PROOF_MODE picks the STARK
+  # variant (composite / succinct / groth16) and WRAP_SNARK flips on the
+  # canonical Bonsai composite -> Groth16 wrap flow. WRAP_SNARK=true
+  # requires the spawned Contemplant to advertise groth16_enabled. The
+  # compose profile `risc0` opts this service in.
+  # The RISC Zero fibonacci Dockerfile is taken verbatim from hierophant's
+  # integration test. It uses the shared `src/fibonacci/` no_std crate
+  # (path-dep'd from both guest and host), so the build context must be
+  # the repo root rather than `src/risc0-fibonacci/`.
+  fibonacci-risc0:
+    profiles: ["risc0", "all"]
+    build:
+      context: .
+      dockerfile: src/risc0-fibonacci/Dockerfile
+      args:
+        BUILD_IMAGE: ${BUILD_IMAGE:-unattended/petros:latest}
+    container_name: fibonacci-risc0
+    network_mode: host
+    depends_on:
+      hierophant:
+        condition: service_healthy
+      magister:
+        condition: service_healthy
+    environment:
+      - RUST_LOG=info
+      - PROOF_MODE=${RISC0_PROOF_MODE:-composite}
+      - WRAP_SNARK=${RISC0_WRAP_SNARK:-false}
+    command:
+      - bash
+      - -c
+      - |
+        echo "Waiting for a RISC Zero-capable idle Contemplant..."
+        while ! (exec 3<>/dev/tcp/localhost/9010 && echo -e 'GET /contemplants HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 && cat <&3 | grep -q "Idle"); do
+          echo "No idle Contemplants available yet, waiting..."
+          sleep 5
+        done
+        echo "Idle Contemplant found, starting RISC Zero fibonacci proof (mode=$$PROOF_MODE, wrap=$$WRAP_SNARK)..."
+        cargo run --release --bin evm -- --n 10 --bonsai-url http://localhost:9010/bonsai

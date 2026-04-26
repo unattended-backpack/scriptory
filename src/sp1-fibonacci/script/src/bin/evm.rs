@@ -1,5 +1,28 @@
-//! An end-to-end example of using the SP1 SDK to generate a proof of a program that can have an
-//! EVM-Compatible proof generated which can be verified on-chain.
+//! End-to-end SP1 demonstration driver against a Hierophant prover network.
+//!
+//! Requests a single fibonacci proof in the `--system`-selected mode. SP1
+//! has four proving modes:
+//!   core        raw STARK, fastest to prove, not EVM-verifiable
+//!   compressed  core STARK compressed into a single recursive proof
+//!   plonk       compressed STARK wrapped into a Plonk SNARK (EVM-verifiable)
+//!   groth16     compressed STARK wrapped into a Groth16 SNARK (EVM-verifiable)
+//!
+//! All four are exposed so scriptory can confirm CUDA-accelerated proof
+//! generation across SP1's full mode menu. For the EVM-verifiable wraps
+//! (plonk and groth16) the client additionally writes a JSON fixture to
+//! `contracts/src/fixtures/{plonk,groth16}-fixture.json` containing
+//! `(vkey, publicValues, proof)` in the exact shape SP1's Solidity verifier
+//! expects; that fixture exists for operators who want to wire up an
+//! out-of-band Foundry / Hardhat test against a stock SP1 verifier
+//! contract. core and compressed proofs have no onchain byte
+//! representation (`proof.bytes()` panics on them) so the fixture step is
+//! skipped for those modes.
+//!
+//! The proof itself is verified server-side by Hierophant before being
+//! returned to this client (see `prover_network_service.rs:Verified
+//! proof ...!!`), so we do not also re-verify here. That keeps scriptory's
+//! test client free of the SP1 circuit artifacts the SDK's `client.verify`
+//! would otherwise need.
 //!
 //! You can run this script using the following command:
 //! ```shell
@@ -7,7 +30,7 @@
 //! ```
 //! or
 //! ```shell
-//! RUST_LOG=info cargo run --release --bin evm -- --system plonk
+//! RUST_LOG=info cargo run --release --bin evm -- --system core
 //! ```
 use alloy_sol_types::SolType;
 use clap::{Parser, ValueEnum};
@@ -32,9 +55,11 @@ struct EVMArgs {
     system: ProofSystem,
 }
 
-/// Enum representing the available proof systems
+/// Enum representing the available proof systems.
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Debug)]
 enum ProofSystem {
+    Core,
+    Compressed,
     Plonk,
     Groth16,
 }
@@ -70,14 +95,32 @@ fn main() {
     let mut stdin = SP1Stdin::new();
     stdin.write(&args.n);
 
-    // Generate the proof based on the selected proof system.
+    // Generate the proof based on the selected proof system. Hierophant
+    // verifies the resulting proof server-side before storing and returning
+    // it; if this call returns Ok the proof is valid.
     let proof = match args.system {
+        ProofSystem::Core => client.prove(&pk, &stdin).core().run(),
+        ProofSystem::Compressed => client.prove(&pk, &stdin).compressed().run(),
         ProofSystem::Plonk => client.prove(&pk, &stdin).plonk().run(),
         ProofSystem::Groth16 => client.prove(&pk, &stdin).groth16().run(),
     }
     .expect("failed to generate proof");
 
-    create_proof_fixture(&proof, &vk, args.system);
+    // Only the EVM-verifiable wraps have a meaningful Solidity-encoded byte
+    // representation; `proof.bytes()` panics on core and compressed proofs
+    // because those modes don't have an onchain encoding to emit. Skip the
+    // fixture step for those two modes.
+    match args.system {
+        ProofSystem::Plonk | ProofSystem::Groth16 => {
+            create_proof_fixture(&proof, &vk, args.system);
+        }
+        ProofSystem::Core | ProofSystem::Compressed => {
+            println!(
+                "Skipping fixture write for {:?} (no onchain byte representation).",
+                args.system
+            );
+        }
+    }
 }
 
 /// Create a fixture for the given proof.
