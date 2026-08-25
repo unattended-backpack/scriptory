@@ -9,11 +9,19 @@ name = "evm"
 path = "src/bin/evm.rs"
 
 [dependencies]
-# scriptory's evm.rs only generates and serializes proofs; verification
+# Scriptory's evm.rs only generates and serializes proofs; verification
 # happens server-side at Hierophant. We therefore omit sp1-sdk's
 # `native-gnark` feature (and its CGO / gnark-go build dependency), since
 # that feature only matters for the client.verify path.
-sp1-sdk = "5.0.8"
+# `network` became opt-in in sp1-sdk 6.x (default = []); the script drives
+# proofs through NETWORK_RPC_URL -> NetworkProver, so it must be explicit.
+# `reserved-capacity` (implies network) flips the 6.x NetworkProver default
+# from Mainnet's auction flow to the Reserved/base flow Hierophant serves;
+# without it, requests target auction RPCs Hierophant does not implement
+# and auto-cancel.
+sp1-sdk = { version = "=6.2.1", features = ["network", "reserved-capacity"] }
+# The 6.x prove/setup surface is async.
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 clap = { version = "4.0", features = ["derive", "env"] }
 # Used by create_proof_fixture in src/bin/evm.rs to dump a JSON fixture
 # alongside each Plonk/Groth16 run. The fixture is for out-of-band
@@ -26,4 +34,4 @@ alloy-sol-types = { workspace = true }
 fibonacci-lib = { path = "../lib" }
 
 [build-dependencies]
-sp1-build = "5.0.8"
+sp1-build = "=6.2.1"

@@ -45,8 +45,8 @@ services:
   # :9000 via sp1-sdk's network prover. SP1_PROOF_SYSTEM picks the SP1
   # proving mode and defaults to plonk; override via .env to exercise core,
   # compressed, plonk, or groth16. Selected via the `sp1` compose profile;
-  # `make test-sp1` activates it, `make scriptory` activates both this and
-  # fibonacci-risc0 via the `all` profile alias.
+  # `make test-sp1` activates it, `make scriptory` activates this alongside
+  # fibonacci-risc0 and fibonacci-openvm via the `all` profile alias.
   # The SP1 fibonacci demo client. Generates a proof and emits a Solidity-
   # verifier-compatible JSON fixture; verification of the proof itself
   # happens server-side at Hierophant before the proof is returned, so this
@@ -125,3 +125,48 @@ services:
         done
         echo "Idle Contemplant found, starting RISC Zero fibonacci proof (mode=$$PROOF_MODE, wrap=$$WRAP_SNARK)..."
         cargo run --release --bin evm -- --n 10 --bonsai-url http://localhost:9010/bonsai
+
+  # OpenVM fibonacci proof. Talks to Hierophant's OpenVM-shaped REST surface
+  # at :9010/openvm/ over raw reqwest; OpenVM has no bonsai-sdk analog, so
+  # the client speaks the wire format directly. PROOF_MODE picks the proof
+  # flavor: app (app-level continuation STARK, the default), stark
+  # (aggregated root STARK), or evm (halo2-wrapped EVM proof; requires a
+  # Contemplant spawned with CONTEMPLANT_OPENVM_EVM=true or an
+  # evm_enabled = true prover entry in magister.toml). The compose profile
+  # `openvm` opts this service in; `make test-openvm` activates it.
+  # Build context is the repo root so the Dockerfile can COPY the shared
+  # `src/fibonacci/` crate, `container/vendor.sh`, and the
+  # `provers/openvm/git/` checksums for the vendored OpenVM git mirrors.
+  # VENDOR_BASE_URL and OPENVM_GIT_VERSION come from `.env.maintainer` via
+  # the Makefile; the substitution defaults below match those values so a
+  # bare `docker compose` invocation also works.
+  fibonacci-openvm:
+    profiles: ["openvm", "all"]
+    build:
+      context: .
+      dockerfile: src/openvm-fibonacci/Dockerfile
+      args:
+        BUILD_IMAGE: ${BUILD_IMAGE:-unattended/petros:latest}
+        VENDOR_BASE_URL: ${VENDOR_BASE_URL:-https://sigil-attic.nyc3.digitaloceanspaces.com/sigil-tarballs}
+        OPENVM_GIT_VERSION: ${OPENVM_GIT_VERSION:-v2.0.1}
+    container_name: fibonacci-openvm
+    network_mode: host
+    depends_on:
+      hierophant:
+        condition: service_healthy
+      magister:
+        condition: service_healthy
+    environment:
+      - RUST_LOG=info
+      - PROOF_MODE=${OPENVM_PROOF_MODE:-app}
+    command:
+      - bash
+      - -c
+      - |
+        echo "Waiting for an OpenVM-capable idle Contemplant..."
+        while ! (exec 3<>/dev/tcp/localhost/9010 && echo -e 'GET /contemplants HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 && cat <&3 | grep -q "Idle"); do
+          echo "No idle Contemplants available yet, waiting..."
+          sleep 5
+        done
+        echo "Idle Contemplant found, starting OpenVM fibonacci proof (mode=$$PROOF_MODE)..."
+        cargo run --release --locked --bin host -- --n 10 --openvm-url http://localhost:9010/openvm
